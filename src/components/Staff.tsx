@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Renderer,
   Stave,
@@ -32,7 +32,8 @@ const VEX_CLEF: Record<ClefId, 'treble' | 'bass' | 'alto'> = {
   alto: 'alto',
 };
 
-const STAVE_WIDTH = 560;
+const MIN_STAVE_WIDTH = 280;
+const MAX_STAVE_WIDTH = 560;
 const STAVE_HEIGHT = 120;
 
 export function Staff({
@@ -46,15 +47,34 @@ export function Staff({
   rhythmNoteKey,
 }: StaffProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(MAX_STAVE_WIDTH);
+
+  // Observar el ancho disponible para que el pentagrama nunca exceda el contenedor.
+  useEffect(() => {
+    const host = containerRef.current;
+    if (!host) return;
+    const update = () => {
+      const w = host.clientWidth;
+      if (w > 0) setContainerWidth(w);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const host = containerRef.current;
     if (!host) return;
     host.innerHTML = '';
 
+    const staveWidth = Math.max(
+      MIN_STAVE_WIDTH,
+      Math.min(MAX_STAVE_WIDTH, Math.floor(containerWidth)),
+    );
     const totalHeight = pianoGrand ? STAVE_HEIGHT * 2 + 20 : STAVE_HEIGHT + 20;
     const renderer = new Renderer(host, Renderer.Backends.SVG);
-    renderer.resize(STAVE_WIDTH, totalHeight);
+    renderer.resize(staveWidth, totalHeight);
     const ctx = renderer.getContext();
     ctx.setFont('Arial', 12);
 
@@ -63,7 +83,7 @@ export function Staff({
 
     // ---- Pentagrama superior ----
     const topClef = VEX_CLEF[clef];
-    const topStave = new Stave(10, 10, STAVE_WIDTH - 20);
+    const topStave = new Stave(10, 10, staveWidth - 20);
     topStave.addClef(topClef);
     if (showTimeSig) topStave.addTimeSignature(timeSig);
     topStave.setContext(ctx).draw();
@@ -78,11 +98,11 @@ export function Staff({
       pianoGrand,
       whichStaff: 'top',
     });
-    drawVoiceAndTies(ctx, topStave, top.notes, top.ties, num, den);
+    drawVoiceAndTies(ctx, topStave, top.notes, top.ties, num, den, staveWidth);
 
     // ---- Pentagrama inferior (modo piano) ----
     if (pianoGrand) {
-      const bottomStave = new Stave(10, STAVE_HEIGHT + 10, STAVE_WIDTH - 20);
+      const bottomStave = new Stave(10, STAVE_HEIGHT + 10, staveWidth - 20);
       bottomStave.addClef('bass');
       if (showTimeSig) bottomStave.addTimeSignature(timeSig);
       bottomStave.setContext(ctx).draw();
@@ -97,9 +117,19 @@ export function Staff({
         pianoGrand,
         whichStaff: 'bottom',
       });
-      drawVoiceAndTies(ctx, bottomStave, bottom.notes, bottom.ties, num, den);
+      drawVoiceAndTies(ctx, bottomStave, bottom.notes, bottom.ties, num, den, staveWidth);
     }
-  }, [clef, pianoGrand, timeSig, mode, noteKey, noteAccidental, rhythm, rhythmNoteKey]);
+  }, [
+    clef,
+    pianoGrand,
+    timeSig,
+    mode,
+    noteKey,
+    noteAccidental,
+    rhythm,
+    rhythmNoteKey,
+    containerWidth,
+  ]);
 
   return <div ref={containerRef} className="vexflow-host" />;
 }
@@ -111,12 +141,13 @@ function drawVoiceAndTies(
   ties: StaveTie[],
   numBeats: number,
   beatValue: number,
+  staveWidth: number,
 ) {
   if (notes.length === 0) return;
   const voice = new Voice({ num_beats: numBeats, beat_value: beatValue });
   voice.setStrict(false);
   voice.addTickables(notes);
-  new Formatter().joinVoices([voice]).format([voice], STAVE_WIDTH - 120);
+  new Formatter().joinVoices([voice]).format([voice], Math.max(120, staveWidth - 120));
   voice.draw(ctx, stave);
   ties.forEach((t) => t.setContext(ctx).draw());
 }

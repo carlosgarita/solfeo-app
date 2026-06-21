@@ -25,6 +25,12 @@ body,
   margin: 0;
 }
 
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 body {
   background: radial-gradient(1200px 800px at 80% -10%, #1b2552 0%, transparent 60%),
     radial-gradient(900px 700px at -10% 100%, #0f1b3a 0%, transparent 60%), var(--bg);
@@ -362,11 +368,20 @@ button {
   border: 1px solid #e5e7eb;
   display: flex;
   justify-content: center;
-  overflow-x: auto;
+  overflow: hidden;
+}
+
+.score-card .vexflow-host {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  justify-content: center;
 }
 
 .score-card svg {
   display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .answer-card {
@@ -423,4 +438,117 @@ kbd {
   font-size: 0.8rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text);
+}
+
+/* ===== Mobile (<= 700px) ===== */
+@media (max-width: 700px) {
+  .topbar {
+    padding: 12px 14px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    font-size: 1rem;
+    gap: 10px;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    font-size: 1.05rem;
+  }
+
+  .brand-sub {
+    font-size: 0.78rem;
+  }
+
+  .tabs {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 8px 10px;
+    font-size: 0.88rem;
+  }
+
+  .content {
+    padding: 14px 14px 28px;
+    gap: 16px;
+  }
+
+  .panel {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  .stage-title {
+    font-size: 1.15rem;
+  }
+
+  .stage-sub {
+    font-size: 0.88rem;
+  }
+
+  .stage-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .stage-actions .btn {
+    flex: 1 1 auto;
+    padding: 9px 12px;
+    font-size: 0.9rem;
+    min-width: 0;
+  }
+
+  .tempo-group {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .tempo-play {
+    flex: 0 0 auto;
+  }
+
+  .tempo-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .score-card {
+    padding: 14px 10px;
+    border-radius: 14px;
+  }
+
+  .answer-card {
+    gap: 10px;
+  }
+
+  .answer-pill {
+    width: 100%;
+    justify-content: center;
+    padding: 9px 14px;
+    font-size: 0.95rem;
+  }
+
+  .footer {
+    padding: 14px 16px;
+    font-size: 0.75rem;
+  }
+}
+
+/* ===== Pantallas muy chicas (<= 380px) ===== */
+@media (max-width: 380px) {
+  .brand-sub {
+    display: none;
+  }
+
+  .stage-actions .btn {
+    font-size: 0.85rem;
+    padding: 8px 10px;
+  }
 }
