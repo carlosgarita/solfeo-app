@@ -1,14 +1,17 @@
 import type { ClefId, TimeSignature } from '../lib/music';
-import { CLEFS, NOTE_LEVELS, RHYTHM_LEVELS, TIME_SIGNATURES } from '../lib/music';
+import { CLEFS, MELODY_LEVELS, NOTE_LEVELS, RHYTHM_LEVELS, TIME_SIGNATURES } from '../lib/music';
+
+type Mode = 'note' | 'rhythm' | 'melody';
 
 interface SidebarProps {
-  mode: 'note' | 'rhythm';
+  mode: Mode;
   clef: ClefId;
   timeSig: TimeSignature;
   pianoGrand: boolean;
   showAnswer: boolean;
   noteLevel: number;
   rhythmLevel: number;
+  melodyLevel: number;
   countInOn: boolean;
   onClefChange: (c: ClefId) => void;
   onTimeSigChange: (t: TimeSignature) => void;
@@ -16,6 +19,7 @@ interface SidebarProps {
   onShowAnswerChange: (v: boolean) => void;
   onNoteLevelChange: (v: number) => void;
   onRhythmLevelChange: (v: number) => void;
+  onMelodyLevelChange: (v: number) => void;
   onCountInChange: (v: boolean) => void;
 }
 
@@ -28,6 +32,7 @@ export function Sidebar(props: SidebarProps) {
     showAnswer,
     noteLevel,
     rhythmLevel,
+    melodyLevel,
     countInOn,
     onClefChange,
     onTimeSigChange,
@@ -35,12 +40,22 @@ export function Sidebar(props: SidebarProps) {
     onShowAnswerChange,
     onNoteLevelChange,
     onRhythmLevelChange,
+    onMelodyLevelChange,
     onCountInChange,
   } = props;
 
-  const levels = mode === 'note' ? NOTE_LEVELS : RHYTHM_LEVELS;
-  const currentLevel = mode === 'note' ? noteLevel : rhythmLevel;
-  const onLevelChange = mode === 'note' ? onNoteLevelChange : onRhythmLevelChange;
+  const levels =
+    mode === 'note' ? NOTE_LEVELS : mode === 'rhythm' ? RHYTHM_LEVELS : MELODY_LEVELS;
+  const currentLevel =
+    mode === 'note' ? noteLevel : mode === 'rhythm' ? rhythmLevel : melodyLevel;
+  const onLevelChange =
+    mode === 'note'
+      ? onNoteLevelChange
+      : mode === 'rhythm'
+        ? onRhythmLevelChange
+        : onMelodyLevelChange;
+  const levelLabel =
+    mode === 'note' ? 'notas' : mode === 'rhythm' ? 'tiempos' : 'melodía';
   const currentInfo = levels.find((l) => l.id === currentLevel);
 
   return (
@@ -48,7 +63,7 @@ export function Sidebar(props: SidebarProps) {
       <h2>Configuración</h2>
 
       <div className="field">
-        <label htmlFor="level">Nivel ({mode === 'note' ? 'notas' : 'tiempos'})</label>
+        <label htmlFor="level">Nivel ({levelLabel})</label>
         <select
           id="level"
           className="select"
@@ -96,7 +111,7 @@ export function Sidebar(props: SidebarProps) {
           ))}
         </select>
         {mode === 'note' && (
-          <p className="hint">El compás solo se usa en la práctica de tiempos.</p>
+          <p className="hint">El compás se usa en las prácticas de tiempos y melodía.</p>
         )}
       </div>
 
@@ -126,7 +141,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
       )}
 
-      {mode === 'rhythm' && (
+      {mode !== 'note' && (
         <div className="field">
           <label className="checkbox">
             <input

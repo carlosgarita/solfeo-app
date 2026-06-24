@@ -1,15 +1,26 @@
-// Reproducción de ritmos con la Web Audio API.
+// Reproducción de ritmos y melodías con la Web Audio API.
 //
 // Diseño:
 // - Un único AudioContext compartido (lazy).
-// - `scheduleRhythmPlayback` programa con precisión absoluta TODAS las notas y
+// - `schedulePlayback` programa con precisión absoluta TODAS las notas y
 //   silencios en el reloj de audio, devolviendo los tiempos para que el
 //   componente visual pueda sincronizar el cursor con el sonido.
 // - Las ligaduras (tiedToNext) unen varias figuras en un solo ataque sostenido.
 // - Los silencios no suenan pero consumen tiempo en la línea.
 // - Staccato => ataque corto (~40% de la duración nominal, máx 180 ms).
+// - Cada PlayableNote puede llevar su propia frecuencia (Hz). Si no se da,
+//   se usa A4 (440 Hz), útil para el ejercicio de ritmo puro.
 
-import type { RhythmNote } from './music';
+/** Nota tocable (subset común de RhythmNote y MelodyNote). */
+export interface PlayableNote {
+  duration: string;
+  isRest: boolean;
+  dotted?: boolean;
+  tiedToNext?: boolean;
+  staccato?: boolean;
+  /** Frecuencia en Hz; si se omite, suena A4 (440 Hz). */
+  freq?: number;
+}
 
 let audioCtx: AudioContext | null = null;
 
@@ -52,7 +63,7 @@ export interface PlaybackHandle {
 }
 
 interface ScheduleOptions {
-  rhythm: RhythmNote[];
+  notes: PlayableNote[];
   /** Negras por minuto (siempre referido a la negra). */
   bpm: number;
   /** Número de clicks de cuenta atrás antes de empezar (0 = sin cuenta). */
@@ -77,13 +88,13 @@ const BEATS_OF: Record<string, number> = {
   '16': 0.25,
 };
 
-function beatsOf(n: RhythmNote): number {
+function beatsOf(n: PlayableNote): number {
   const base = BEATS_OF[n.duration] ?? 1;
   return n.dotted ? base * 1.5 : base;
 }
 
-export function scheduleRhythmPlayback(opts: ScheduleOptions): PlaybackHandle {
-  const { rhythm, bpm, countIn, beatsPerMeasure, onEnd } = opts;
+export function schedulePlayback(opts: ScheduleOptions): PlaybackHandle {
+  const { notes, bpm, countIn, beatsPerMeasure, onEnd } = opts;
   const ctx = getAudioContext();
   const beatSec = 60 / bpm;
   // Pequeño colchón para que el primer sonido no se "corte" por estar en el pasado.
@@ -103,14 +114,22 @@ export function scheduleRhythmPlayback(opts: ScheduleOptions): PlaybackHandle {
   const events: PlayheadEvent[] = [];
   let cursorBeats = 0;
   let i = 0;
-  while (i < rhythm.length) {
-    const first = rhythm[i];
+  while (i < notes.length) {
+    const first = notes[i];
     const startBeat = cursorBeats;
     let totalBeats = beatsOf(first);
     const groupStartIndex = i;
-    while (i < rhythm.length - 1 && rhythm[i].tiedToNext && !rhythm[i].isRest) {
+    // Las ligaduras solo se agrupan si las notas tienen el mismo pitch (o ambas son
+    // del ejercicio de ritmo puro, donde freq es undefined y se asume A4).
+    while (
+      i < notes.length - 1 &&
+      notes[i].tiedToNext &&
+      !notes[i].isRest &&
+      !notes[i + 1].isRest &&
+      notes[i].freq === notes[i + 1].freq
+    ) {
       i += 1;
-      totalBeats += beatsOf(rhythm[i]);
+      totalBeats += beatsOf(notes[i]);
     }
 
     const isRest = first.isRest;
@@ -122,7 +141,7 @@ export function scheduleRhythmPlayback(opts: ScheduleOptions): PlaybackHandle {
       const playFor = staccato
         ? Math.min(durSec * 0.4, 0.18)
         : Math.max(0.06, durSec * 0.92);
-      scheduleTone(ctx, when, playFor, sources);
+      scheduleTone(ctx, when, playFor, first.freq ?? 440, sources);
     }
 
     events.push({
@@ -203,13 +222,13 @@ function scheduleTone(
   ctx: AudioContext,
   when: number,
   durSec: number,
+  freq: number,
   sources: LiveSource[],
 ): void {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
-  // Tono fijo agradable (A4). Este ejercicio es de ritmo, no de afinación.
-  osc.frequency.setValueAtTime(440, when);
+  osc.frequency.setValueAtTime(freq, when);
 
   const peak = 0.18;
   const attack = 0.012;

@@ -11,7 +11,13 @@ import {
   Modifier,
   StaveTie,
 } from 'vexflow';
-import type { Accidental as AccidentalSym, ClefId, RhythmNote, TimeSignature } from '../lib/music';
+import type {
+  Accidental as AccidentalSym,
+  ClefId,
+  MelodyNote,
+  RhythmNote,
+  TimeSignature,
+} from '../lib/music';
 
 export interface StaffLayout {
   /** Ancho total del SVG en píxeles. */
@@ -35,13 +41,14 @@ interface StaffProps {
   clef: ClefId;
   pianoGrand: boolean;
   timeSig: TimeSignature;
-  mode: 'note' | 'rhythm';
+  mode: 'note' | 'rhythm' | 'melody';
   /** Modo nota: clave VexFlow ej. "c/4" o "c#/4". */
   noteKey?: string;
   /** Alteración explícita (necesaria para becuadros; redundante para # y b). */
   noteAccidental?: AccidentalSym;
   rhythm?: RhythmNote[];
   rhythmNoteKey?: string;
+  melody?: MelodyNote[];
   /** Se llama tras renderizar el SVG con el layout para sincronizar el cursor externo. */
   onLayout?: (layout: StaffLayout) => void;
 }
@@ -66,6 +73,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     noteAccidental,
     rhythm,
     rhythmNoteKey,
+    melody,
     onLayout,
   },
   ref,
@@ -126,7 +134,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     ctx.setFont('Arial', 12);
 
     const [num, den] = timeSig.split('/').map(Number);
-    const showTimeSig = mode === 'rhythm';
+    const showTimeSig = mode === 'rhythm' || mode === 'melody';
 
     // ---- Pentagrama superior ----
     const topClef = VEX_CLEF[clef];
@@ -141,6 +149,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
       noteAccidental,
       rhythm,
       rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
+      melody,
       clefForNotes: topClef,
       pianoGrand,
       whichStaff: 'top',
@@ -160,6 +169,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
         noteAccidental,
         rhythm,
         rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
+        melody,
         clefForNotes: 'bass',
         pianoGrand,
         whichStaff: 'bottom',
@@ -171,7 +181,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     // sincronizar el cursor (playhead) con el audio.
     if (onLayout) {
       const notePositions =
-        mode === 'rhythm'
+        mode === 'rhythm' || mode === 'melody'
           ? top.notes.map((n) => n.getAbsoluteX())
           : [];
       const contentStartX =
@@ -196,6 +206,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     noteAccidental,
     rhythm,
     rhythmNoteKey,
+    melody,
     containerWidth,
     onLayout,
   ]);
@@ -232,11 +243,12 @@ function drawVoiceAndTies(
 }
 
 interface BuildOpts {
-  mode: 'note' | 'rhythm';
+  mode: 'note' | 'rhythm' | 'melody';
   noteKey?: string;
   noteAccidental?: AccidentalSym;
   rhythm?: RhythmNote[];
   rhythmNoteKey: string;
+  melody?: MelodyNote[];
   clefForNotes: 'treble' | 'bass' | 'alto';
   pianoGrand: boolean;
   whichStaff: 'top' | 'bottom';
@@ -254,10 +266,53 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
     noteAccidental,
     rhythm,
     rhythmNoteKey,
+    melody,
     clefForNotes,
     pianoGrand,
     whichStaff,
   } = opts;
+
+  if (mode === 'melody') {
+    if (!melody || melody.length === 0) return { notes: [], ties: [] };
+    // En modo melodía dibujamos siempre en el stave superior (con la clave elegida).
+    if (pianoGrand && whichStaff === 'bottom') return { notes: [], ties: [] };
+
+    const restKey = defaultRhythmKey(clefForNotes);
+    const notes: StaveNote[] = melody.map((n) => {
+      const sn = new StaveNote({
+        clef: clefForNotes,
+        keys: [n.isRest ? restKey : n.key ?? restKey],
+        duration: n.isRest ? `${n.duration}r` : n.duration,
+      });
+      if (!n.isRest && n.accidental) {
+        sn.addModifier(new Accidental(n.accidental), 0);
+      }
+      if (n.dotted && !n.isRest) {
+        Dot.buildAndAttach([sn], { all: true });
+      }
+      if (n.staccato && !n.isRest) {
+        const artic = new Articulation('a.');
+        artic.setPosition(Modifier.Position.BELOW);
+        sn.addModifier(artic, 0);
+      }
+      return sn;
+    });
+
+    const ties: StaveTie[] = [];
+    for (let i = 0; i < melody.length - 1; i++) {
+      if (melody[i].tiedToNext && !melody[i].isRest && !melody[i + 1].isRest) {
+        ties.push(
+          new StaveTie({
+            first_note: notes[i],
+            last_note: notes[i + 1],
+            first_indices: [0],
+            last_indices: [0],
+          }),
+        );
+      }
+    }
+    return { notes, ties };
+  }
 
   if (mode === 'note') {
     if (!noteKey) return { notes: [], ties: [] };
