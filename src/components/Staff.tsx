@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   Renderer,
   Stave,
@@ -13,6 +13,24 @@ import {
 } from 'vexflow';
 import type { Accidental as AccidentalSym, ClefId, RhythmNote, TimeSignature } from '../lib/music';
 
+export interface StaffLayout {
+  /** Ancho total del SVG en píxeles. */
+  width: number;
+  /** Alto total del SVG en píxeles. */
+  height: number;
+  /** Posición X (en px) donde el cursor entra a la zona musical (después de la clave/compás). */
+  contentStartX: number;
+  /** Posición X (en px) donde termina la zona musical (final del stave). */
+  contentEndX: number;
+  /** Posición X (en px) absoluta del ataque de cada nota del ritmo. */
+  notePositions: number[];
+}
+
+export interface StaffHandle {
+  /** Mueve el cursor (playhead) a la posición X dada (en px). Pasa `null` para ocultarlo. */
+  setPlayhead: (x: number | null) => void;
+}
+
 interface StaffProps {
   clef: ClefId;
   pianoGrand: boolean;
@@ -24,6 +42,8 @@ interface StaffProps {
   noteAccidental?: AccidentalSym;
   rhythm?: RhythmNote[];
   rhythmNoteKey?: string;
+  /** Se llama tras renderizar el SVG con el layout para sincronizar el cursor externo. */
+  onLayout?: (layout: StaffLayout) => void;
 }
 
 const VEX_CLEF: Record<ClefId, 'treble' | 'bass' | 'alto'> = {
@@ -36,35 +56,62 @@ const MIN_STAVE_WIDTH = 280;
 const MAX_STAVE_WIDTH = 560;
 const STAVE_HEIGHT = 120;
 
-export function Staff({
-  clef,
-  pianoGrand,
-  timeSig,
-  mode,
-  noteKey,
-  noteAccidental,
-  rhythm,
-  rhythmNoteKey,
-}: StaffProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
+  {
+    clef,
+    pianoGrand,
+    timeSig,
+    mode,
+    noteKey,
+    noteAccidental,
+    rhythm,
+    rhythmNoteKey,
+    onLayout,
+  },
+  ref,
+) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const svgHostRef = useRef<HTMLDivElement>(null);
+  const playheadRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(MAX_STAVE_WIDTH);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      setPlayhead(x: number | null) {
+        const el = playheadRef.current;
+        if (!el) return;
+        if (x == null) {
+          el.style.opacity = '0';
+        } else {
+          el.style.opacity = '1';
+          el.style.transform = `translateX(${x}px)`;
+        }
+      },
+    }),
+    [],
+  );
+
   // Observar el ancho disponible para que el pentagrama nunca exceda el contenedor.
+  // Medimos el padre (.score-card) porque el wrapper se autoajusta al SVG.
   useEffect(() => {
-    const host = containerRef.current;
+    const host = wrapperRef.current;
     if (!host) return;
+    const parent = host.parentElement ?? host;
     const update = () => {
-      const w = host.clientWidth;
-      if (w > 0) setContainerWidth(w);
+      const w = parent.clientWidth;
+      // Restamos el padding interno del score-card aproximado (22px * 2).
+      const usable = Math.max(MIN_STAVE_WIDTH, w - 8);
+      if (usable > 0) setContainerWidth(usable);
     };
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(host);
+    ro.observe(parent);
     return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
-    const host = containerRef.current;
+    const host = svgHostRef.current;
     if (!host) return;
     host.innerHTML = '';
 
@@ -119,6 +166,27 @@ export function Staff({
       });
       drawVoiceAndTies(ctx, bottomStave, bottom.notes, bottom.ties, num, den, staveWidth);
     }
+
+    // Exponer el layout (posiciones X de cada nota) para que el padre pueda
+    // sincronizar el cursor (playhead) con el audio.
+    if (onLayout) {
+      const notePositions =
+        mode === 'rhythm'
+          ? top.notes.map((n) => n.getAbsoluteX())
+          : [];
+      const contentStartX =
+        notePositions.length > 0
+          ? notePositions[0]
+          : topStave.getNoteStartX();
+      const contentEndX = topStave.getNoteEndX();
+      onLayout({
+        width: staveWidth,
+        height: totalHeight,
+        contentStartX,
+        contentEndX,
+        notePositions,
+      });
+    }
   }, [
     clef,
     pianoGrand,
@@ -129,10 +197,21 @@ export function Staff({
     rhythm,
     rhythmNoteKey,
     containerWidth,
+    onLayout,
   ]);
 
-  return <div ref={containerRef} className="vexflow-host" />;
-}
+  return (
+    <div ref={wrapperRef} className="vexflow-host">
+      <div ref={svgHostRef} className="vexflow-svg" />
+      <div
+        ref={playheadRef}
+        className="vexflow-playhead"
+        aria-hidden="true"
+        style={{ opacity: 0, transform: 'translateX(0px)' }}
+      />
+    </div>
+  );
+});
 
 function drawVoiceAndTies(
   ctx: any,

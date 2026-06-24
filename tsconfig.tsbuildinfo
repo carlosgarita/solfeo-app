@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/components/sidebar.tsx","./src/components/staff.tsx","./src/lib/music.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/sidebar.tsx","./src/components/staff.tsx","./src/lib/audio.ts","./src/lib/music.ts"],"version":"5.9.3"}

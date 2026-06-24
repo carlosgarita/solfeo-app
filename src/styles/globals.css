@@ -372,16 +372,32 @@ button {
 }
 
 .score-card .vexflow-host {
-  width: 100%;
-  max-width: 560px;
-  display: flex;
-  justify-content: center;
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.score-card .vexflow-svg {
+  display: block;
 }
 
 .score-card svg {
   display: block;
-  max-width: 100%;
-  height: auto;
+}
+
+.vexflow-playhead {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  bottom: 6px;
+  width: 2px;
+  background: linear-gradient(180deg, #f97316, #ef4444);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.55);
+  transition: opacity 0.15s ease;
+  will-change: transform;
 }
 
 .answer-card {

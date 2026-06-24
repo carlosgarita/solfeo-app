@@ -9,12 +9,14 @@ interface SidebarProps {
   showAnswer: boolean;
   noteLevel: number;
   rhythmLevel: number;
+  countInOn: boolean;
   onClefChange: (c: ClefId) => void;
   onTimeSigChange: (t: TimeSignature) => void;
   onPianoGrandChange: (v: boolean) => void;
   onShowAnswerChange: (v: boolean) => void;
   onNoteLevelChange: (v: number) => void;
   onRhythmLevelChange: (v: number) => void;
+  onCountInChange: (v: boolean) => void;
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -26,12 +28,14 @@ export function Sidebar(props: SidebarProps) {
     showAnswer,
     noteLevel,
     rhythmLevel,
+    countInOn,
     onClefChange,
     onTimeSigChange,
     onPianoGrandChange,
     onShowAnswerChange,
     onNoteLevelChange,
     onRhythmLevelChange,
+    onCountInChange,
   } = props;
 
   const levels = mode === 'note' ? NOTE_LEVELS : RHYTHM_LEVELS;
@@ -119,6 +123,22 @@ export function Sidebar(props: SidebarProps) {
             Mostrar nombre de la nota
           </label>
           <p className="hint">Útil al principio; quítalo cuando quieras retarte.</p>
+        </div>
+      )}
+
+      {mode === 'rhythm' && (
+        <div className="field">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={countInOn}
+              onChange={(e) => onCountInChange(e.target.checked)}
+            />
+            Cuenta atrás antes de reproducir
+          </label>
+          <p className="hint">
+            Marca un compás completo (con acento en el primer pulso) antes del ejercicio.
+          </p>
         </div>
       )}
 

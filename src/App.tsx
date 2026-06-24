@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { Staff } from './components/Staff';
+import { Staff, type StaffHandle, type StaffLayout } from './components/Staff';
 import {
   type ClefId,
   type NoteExercise,
@@ -15,6 +15,9 @@ import {
   vexNoteToEnglish,
   vexNoteToSpanish,
 } from './lib/music';
+import { scheduleRhythmPlayback, type PlaybackHandle } from './lib/audio';
+
+const BPM_OPTIONS = [50, 60, 70, 80, 90, 100, 110, 120, 140, 160] as const;
 
 type Mode = 'note' | 'rhythm';
 
@@ -41,14 +44,37 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const lastSig = useRef('');
 
+  // ---- Reproducción de ritmo ----
+  const [bpm, setBpm] = useState<number>(80);
+  const [countInOn, setCountInOn] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const staffRef = useRef<StaffHandle>(null);
+  const layoutRef = useRef<StaffLayout | null>(null);
+  const playbackRef = useRef<PlaybackHandle | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const stopPlayback = useCallback(() => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (playbackRef.current) {
+      playbackRef.current.stop();
+      playbackRef.current = null;
+    }
+    staffRef.current?.setPlayhead(null);
+    setIsPlaying(false);
+  }, []);
+
   const nextNote = useCallback(() => {
     setCurrentNote((prev) => generateNoteExercise(clef, noteLevel, prev.key));
     setRevealNote(showAnswer);
   }, [clef, noteLevel, showAnswer]);
 
   const nextRhythm = useCallback(() => {
+    stopPlayback();
     setCurrentRhythm(generateMeasureByLevel(timeSig, rhythmLevel));
-  }, [timeSig, rhythmLevel]);
+  }, [timeSig, rhythmLevel, stopPlayback]);
 
   // Regenerar el ejercicio cuando cambian parámetros relevantes (clave/nivel/compás)
   useEffect(() => {
@@ -117,6 +143,98 @@ export default function App() {
     setRevealNote(showAnswer);
   }, [showAnswer]);
 
+  // Detener reproducción si cambian parámetros relevantes o salimos del modo ritmo.
+  useEffect(() => {
+    stopPlayback();
+  }, [mode, clef, timeSig, rhythmLevel, pianoGrand, currentRhythm, stopPlayback]);
+
+  // Limpiar al desmontar.
+  useEffect(() => stopPlayback, [stopPlayback]);
+
+  const handleStaffLayout = useCallback((layout: StaffLayout) => {
+    layoutRef.current = layout;
+  }, []);
+
+  const startPlayback = useCallback(() => {
+    if (isPlaying) return;
+    const layout = layoutRef.current;
+    if (!layout || layout.notePositions.length === 0) return;
+
+    const [num] = timeSig.split('/').map(Number);
+    const countIn = countInOn ? num : 0;
+
+    const handle = scheduleRhythmPlayback({
+      rhythm: currentRhythm,
+      bpm,
+      countIn,
+      beatsPerMeasure: num,
+      onEnd: () => {
+        // Limpia y deja el cursor invisible al terminar.
+        if (rafRef.current != null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        playbackRef.current = null;
+        staffRef.current?.setPlayhead(null);
+        setIsPlaying(false);
+      },
+    });
+    playbackRef.current = handle;
+    setIsPlaying(true);
+
+    // Mapa beatMusical -> X en píxeles.
+    // Las posiciones de las notas en VexFlow no son lineales con el tiempo
+    // (cabeza de la nota está desplazada), así que interpolamos entre el
+    // arranque de cada figura y el de la siguiente / final del compás.
+    const beatsTotal = handle.musicDurationSec / (60 / bpm);
+    const noteStartBeats: number[] = [];
+    let acc = 0;
+    for (const n of currentRhythm) {
+      noteStartBeats.push(acc);
+      const base = { w: 4, h: 2, q: 1, '8': 0.5, '16': 0.25 }[n.duration] ?? 1;
+      acc += n.dotted ? base * 1.5 : base;
+    }
+    const positions = layout.notePositions;
+    const endX = layout.contentEndX;
+
+    const beatToX = (beat: number): number => {
+      if (positions.length === 0) return layout.contentStartX;
+      if (beat <= noteStartBeats[0]) return positions[0];
+      for (let i = 0; i < positions.length; i++) {
+        const startB = noteStartBeats[i];
+        const nextB = i + 1 < positions.length ? noteStartBeats[i + 1] : beatsTotal;
+        if (beat >= startB && beat <= nextB) {
+          const startX = positions[i];
+          const nextX = i + 1 < positions.length ? positions[i + 1] : endX;
+          const t = nextB === startB ? 0 : (beat - startB) / (nextB - startB);
+          return startX + (nextX - startX) * t;
+        }
+      }
+      return endX;
+    };
+
+    const tick = () => {
+      const cur = handle.ctx.currentTime;
+      const elapsedFromMusic = cur - handle.musicStartTime;
+      if (cur < handle.musicStartTime) {
+        // Cuenta atrás: cursor justo antes de la primera nota, parpadeando.
+        staffRef.current?.setPlayhead(layout.contentStartX);
+      } else if (elapsedFromMusic >= handle.musicDurationSec) {
+        staffRef.current?.setPlayhead(endX);
+      } else {
+        const beat = elapsedFromMusic / (60 / bpm);
+        staffRef.current?.setPlayhead(beatToX(beat));
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [bpm, countInOn, currentRhythm, isPlaying, timeSig]);
+
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) stopPlayback();
+    else startPlayback();
+  }, [isPlaying, startPlayback, stopPlayback]);
+
   const rhythmSummary = useMemo(() => {
     return currentRhythm.map((n) => figureNameEs(n)).join(' · ');
   }, [currentRhythm]);
@@ -161,12 +279,14 @@ export default function App() {
           showAnswer={showAnswer}
           noteLevel={noteLevel}
           rhythmLevel={rhythmLevel}
+          countInOn={countInOn}
           onClefChange={setClef}
           onTimeSigChange={setTimeSig}
           onPianoGrandChange={setPianoGrand}
           onShowAnswerChange={setShowAnswer}
           onNoteLevelChange={setNoteLevel}
           onRhythmLevelChange={setRhythmLevel}
+          onCountInChange={setCountInOn}
         />
 
         <section className="stage" aria-label="Pentagrama">
@@ -190,6 +310,32 @@ export default function App() {
                 >
                   {revealNote ? 'Ocultar nombre' : 'Revelar nombre'}
                 </button>
+              )}
+              {mode === 'rhythm' && (
+                <div className="tempo-group" role="group" aria-label="Reproducir compás">
+                  <button
+                    className={`btn ${isPlaying ? 'btn-danger' : 'btn-success'} tempo-play`}
+                    onClick={togglePlayback}
+                    aria-pressed={isPlaying}
+                    title="Reproducir el compás con el cursor"
+                  >
+                    {isPlaying ? '⏹ Detener' : '▶ Reproducir'}
+                  </button>
+                  <select
+                    className="select tempo-select"
+                    value={bpm}
+                    onChange={(e) => setBpm(Number(e.target.value))}
+                    aria-label="BPM"
+                    title="Pulsos por minuto (referido a la negra)"
+                    disabled={isPlaying}
+                  >
+                    {BPM_OPTIONS.map((b) => (
+                      <option key={b} value={b}>
+                        {b} BPM
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
               <div className="tempo-group" role="group" aria-label="Modo automático">
                 <button
@@ -229,6 +375,7 @@ export default function App() {
 
           <div className="score-card">
             <Staff
+              ref={staffRef}
               clef={clef}
               pianoGrand={pianoGrand}
               timeSig={timeSig}
@@ -236,6 +383,7 @@ export default function App() {
               noteKey={mode === 'note' ? currentNote.key : undefined}
               noteAccidental={mode === 'note' ? currentNote.accidental : undefined}
               rhythm={mode === 'rhythm' ? currentRhythm : undefined}
+              onLayout={handleStaffLayout}
             />
           </div>
 
