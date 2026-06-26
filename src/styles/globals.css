@@ -380,10 +380,13 @@ button {
 
 .score-card .vexflow-svg {
   display: block;
+  max-width: 100%;
 }
 
 .score-card svg {
   display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .vexflow-playhead {
@@ -406,30 +409,39 @@ button {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .answer-pill {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 16px;
-  border-radius: 999px;
+  border-radius: 16px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   font-weight: 700;
   font-size: 1rem;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .answer-pill .label {
   color: var(--text-dim);
   font-weight: 500;
   font-size: 0.85rem;
+  flex: 0 0 auto;
 }
 
 .answer-pill .value {
   color: var(--accent);
   font-size: 1.05rem;
   letter-spacing: 0.5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .answer-pill.hidden .value {
@@ -536,7 +548,7 @@ kbd {
   }
 
   .score-card {
-    padding: 14px 10px;
+    padding: 12px 8px;
     border-radius: 14px;
   }
 
@@ -546,9 +558,16 @@ kbd {
 
   .answer-pill {
     width: 100%;
-    justify-content: center;
-    padding: 9px 14px;
+    justify-content: flex-start;
+    padding: 10px 14px;
     font-size: 0.95rem;
+    border-radius: 14px;
+  }
+
+  .answer-pill .value {
+    font-size: 0.9rem;
+    letter-spacing: 0.3px;
+    line-height: 1.45;
   }
 
   .footer {

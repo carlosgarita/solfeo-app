@@ -59,7 +59,7 @@ const VEX_CLEF: Record<ClefId, 'treble' | 'bass' | 'alto'> = {
   alto: 'alto',
 };
 
-const MIN_STAVE_WIDTH = 280;
+const MIN_STAVE_WIDTH = 220;
 const MAX_STAVE_WIDTH = 560;
 const STAVE_HEIGHT = 120;
 
@@ -101,15 +101,18 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
   );
 
   // Observar el ancho disponible para que el pentagrama nunca exceda el contenedor.
-  // Medimos el padre (.score-card) porque el wrapper se autoajusta al SVG.
+  // Medimos el padre (.score-card) y restamos su padding REAL (no estimado),
+  // porque el wrapper se autoajusta al SVG.
   useEffect(() => {
     const host = wrapperRef.current;
     if (!host) return;
     const parent = host.parentElement ?? host;
     const update = () => {
-      const w = parent.clientWidth;
-      // Restamos el padding interno del score-card aproximado (22px * 2).
-      const usable = Math.max(MIN_STAVE_WIDTH, w - 8);
+      const cs = window.getComputedStyle(parent);
+      const pl = parseFloat(cs.paddingLeft) || 0;
+      const pr = parseFloat(cs.paddingRight) || 0;
+      const inner = parent.clientWidth - pl - pr;
+      const usable = Math.max(MIN_STAVE_WIDTH, Math.floor(inner));
       if (usable > 0) setContainerWidth(usable);
     };
     update();
