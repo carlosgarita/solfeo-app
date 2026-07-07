@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PwaPrompts } from './components/PwaPrompts';
 import { Sidebar } from './components/Sidebar';
 import { Staff, type StaffHandle, type StaffLayout } from './components/Staff';
 import {
@@ -490,6 +491,8 @@ export default function App() {
       <footer className="footer">
         Fase 1 · Hecho con VexFlow. Próximamente: diagramas de bajo, guitarra y piano.
       </footer>
+
+      <PwaPrompts />
     </div>
   );
 }
