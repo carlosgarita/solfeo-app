@@ -16,6 +16,7 @@ import {
   generateNoteExercise,
   generateRhythmMeasures,
   melodySummaryEs,
+  rhythmNoteBeats,
   vexKeyToFrequency,
   vexNoteToEnglish,
   vexNoteToSpanish,
@@ -246,8 +247,7 @@ export default function App() {
     let acc = 0;
     for (const n of sourceNotes) {
       noteStartBeats.push(acc);
-      const base = { w: 4, h: 2, q: 1, '8': 0.5, '16': 0.25 }[n.duration] ?? 1;
-      acc += n.dotted ? base * 1.5 : base;
+      acc += rhythmNoteBeats(n);
     }
 
     const positions = layout.notePositions;

@@ -227,53 +227,148 @@ export interface RhythmNote {
 
 interface PaletteEntry {
   duration: string;
-  units: number;
+  /** Duración en ticks de semicorchea (4 ticks = 1 semicorchea, 16 = negra, 64 = redonda). */
+  ticks: number;
   dotted?: boolean;
 }
 
-/**
- * Genera un compás aleatorio según el nivel.
- * 1: w,h,q,8 · 2: + puntillos · 3: + staccato · 4: + ligaduras · 5: + silencios · 6: + 16
- */
-export function generateMeasureByLevel(timeSig: TimeSignature, level: number): RhythmNote[] {
-  const compound = timeSig === '6/8';
+/** Capacidad del compás en ticks (negra=16, blanca=32, redonda=64). 4/4 → 64 ticks. */
+function measureCapacityTicks(timeSig: TimeSignature): number {
   const [num, den] = timeSig.split('/').map(Number);
-  const total = compound ? 6 : num * (4 / den); // unidades en corcheas o negras
+  // num pulsos de 1/den de redonda → en ticks: num × (64/den)
+  return Math.round((num * 64) / den);
+}
 
+function noteDurationTicks(duration: string, dotted?: boolean): number {
+  const base: Record<string, number> = {
+    w: 64,
+    h: 32,
+    q: 16,
+    '8': 8,
+    '16': 4,
+  };
+  const ticks = base[duration] ?? 16;
+  return dotted ? Math.round(ticks * 1.5) : ticks;
+}
+
+function sumRhythmTicks(notes: Pick<RhythmNote, 'duration' | 'dotted'>[]): number {
+  return notes.reduce((s, n) => s + noteDurationTicks(n.duration, n.dotted), 0);
+}
+
+/** Duración de una figura en negras (para audio y cursor). 1 = negra, 0.5 = corchea, etc. */
+export function rhythmNoteBeats(n: Pick<RhythmNote, 'duration' | 'dotted'>): number {
+  return noteDurationTicks(n.duration, n.dotted) / 16;
+}
+
+/** Duración total de un compás en negras (debe coincidir con el numerador en x/4). */
+export function measureTotalBeats(timeSig: TimeSignature): number {
+  return measureCapacityTicks(timeSig) / 16;
+}
+
+function buildPalette(timeSig: TimeSignature, level: number): PaletteEntry[] {
+  const compound = timeSig === '6/8';
   const palette: PaletteEntry[] = compound
     ? [
-        { duration: 'q', units: 2 },
-        { duration: '8', units: 1 },
+        { duration: 'q', ticks: 16 }, // negra = 2 corcheas
+        { duration: '8', ticks: 8 },
       ]
     : [
-        { duration: 'w', units: 4 },
-        { duration: 'h', units: 2 },
-        { duration: 'q', units: 1 },
-        { duration: '8', units: 0.5 },
+        { duration: 'w', ticks: 64 },
+        { duration: 'h', ticks: 32 },
+        { duration: 'q', ticks: 16 },
+        { duration: '8', ticks: 8 },
       ];
 
   if (level >= 2 && !compound) {
-    palette.push({ duration: 'h', units: 3, dotted: true }); // blanca con puntillo
-    palette.push({ duration: 'q', units: 1.5, dotted: true }); // negra con puntillo
+    palette.push({ duration: 'h', ticks: 48, dotted: true });
+    palette.push({ duration: 'q', ticks: 24, dotted: true });
   }
   if (level >= 6) {
-    palette.push({ duration: '16', units: compound ? 0.5 : 0.25 });
+    palette.push({ duration: '16', ticks: 4 });
   }
+  return palette;
+}
 
+/** Garantiza que un compás rítmico sume exactamente la capacidad del compás. */
+function normalizeRhythmMeasure(timeSig: TimeSignature, notes: RhythmNote[]): RhythmNote[] {
+  const capacity = measureCapacityTicks(timeSig);
+  let sum = sumRhythmTicks(notes);
+  if (sum === capacity) return notes;
+
+  const out = [...notes];
+  if (sum > capacity) {
+    while (out.length > 0 && sum > capacity) {
+      const last = out.pop()!;
+      sum -= noteDurationTicks(last.duration, last.dotted);
+    }
+  }
+  if (sum < capacity) {
+    for (const entry of fillRemainingTicks(capacity - sum)) {
+      out.push({ duration: entry.duration, isRest: true });
+    }
+  }
+  return out;
+}
+
+/** Garantiza que un compás melódico sume exactamente la capacidad del compás. */
+function normalizeMelodyMeasure(timeSig: TimeSignature, notes: MelodyNote[]): MelodyNote[] {
+  const capacity = measureCapacityTicks(timeSig);
+  let sum = sumRhythmTicks(notes);
+  if (sum === capacity) return notes;
+
+  const out = [...notes];
+  if (sum > capacity) {
+    while (out.length > 0 && sum > capacity) {
+      const last = out.pop()!;
+      sum -= noteDurationTicks(last.duration, last.dotted);
+    }
+  }
+  if (sum < capacity) {
+    for (const entry of fillRemainingTicks(capacity - sum)) {
+      out.push({ duration: entry.duration, isRest: true });
+    }
+  }
+  return out;
+}
+
+/** Rellena exactamente los ticks restantes con negras, corcheas y semicorcheas. */
+function fillRemainingTicks(remainingTicks: number): PaletteEntry[] {
+  const fill: PaletteEntry[] = [];
+  let r = remainingTicks;
+  const steps: PaletteEntry[] = [
+    { duration: 'q', ticks: 16 },
+    { duration: '8', ticks: 8 },
+    { duration: '16', ticks: 4 },
+  ];
+  while (r > 0) {
+    const step = steps.find((s) => s.ticks <= r);
+    if (!step) break;
+    fill.push(step);
+    r -= step.ticks;
+  }
+  return fill;
+}
+
+/**
+ * Genera las figuras rítmicas de un compás que suman EXACTAMENTE la duración del compás.
+ * Devuelve un array cuya suma de ticks coincide con measureCapacityTicks(timeSig).
+ */
+function generateRhythmPattern(timeSig: TimeSignature, level: number): RhythmNote[] {
+  const capacity = measureCapacityTicks(timeSig);
+  const palette = buildPalette(timeSig, level);
   const allowStaccato = level >= 3;
   const allowTies = level >= 4;
   const allowRests = level >= 5;
 
   const result: RhythmNote[] = [];
-  let remaining = total;
+  let remaining = capacity;
   let guard = 64;
 
   while (remaining > 0 && guard-- > 0) {
-    const candidates = palette.filter((p) => p.units <= remaining + 1e-6);
+    const candidates = palette.filter((p) => p.ticks <= remaining);
     if (candidates.length === 0) break;
     const pick = pickRandom(candidates);
     const isRest = allowRests && !pick.dotted && Math.random() < 0.18;
-    // Staccato en figuras cortas/medianas (no redonda, no silencio).
     const staccato =
       allowStaccato && !isRest && pick.duration !== 'w' && Math.random() < 0.32;
     result.push({
@@ -282,24 +377,18 @@ export function generateMeasureByLevel(timeSig: TimeSignature, level: number): R
       dotted: pick.dotted,
       staccato,
     });
-    remaining -= pick.units;
+    remaining -= pick.ticks;
   }
 
-  // Rellenar restos con negras / corcheas
-  while (remaining >= 1 - 1e-6) {
-    result.push({ duration: 'q', isRest: false });
-    remaining -= 1;
-  }
-  if (remaining >= 0.5 - 1e-6) {
-    result.push({ duration: '8', isRest: false });
-    remaining -= 0.5;
-  }
-  if (remaining >= 0.25 - 1e-6) {
-    result.push({ duration: '16', isRest: false });
+  // Rellenar el resto con figuras exactas (evita compases incompletos por redondeos).
+  let sum = sumRhythmTicks(result);
+  if (sum < capacity) {
+    for (const entry of fillRemainingTicks(capacity - sum)) {
+      result.push({ duration: entry.duration, isRest: false });
+    }
   }
 
-  // Ligaduras (nivel 4+): unir pares adyacentes; al ligar quitamos el staccato del primero
-  // (no tiene sentido musical un staccato sobre una nota ligada).
+  // Ligaduras (nivel 4+):
   if (allowTies && result.length >= 2) {
     for (let i = 0; i < result.length - 1; i++) {
       const a = result[i];
@@ -309,12 +398,20 @@ export function generateMeasureByLevel(timeSig: TimeSignature, level: number): R
         a.tiedToNext = true;
         a.staccato = false;
         b.staccato = false;
-        i++; // evitar encadenar 3 seguidas
+        i++;
       }
     }
   }
 
-  return result;
+  return normalizeRhythmMeasure(timeSig, result);
+}
+
+/**
+ * Genera un compás aleatorio según el nivel.
+ * 1: w,h,q,8 · 2: + puntillos · 3: + staccato · 4: + ligaduras · 5: + silencios · 6: + 16
+ */
+export function generateMeasureByLevel(timeSig: TimeSignature, level: number): RhythmNote[] {
+  return generateRhythmPattern(timeSig, level);
 }
 
 export function pickRandom<T>(arr: T[]): T {
@@ -365,32 +462,8 @@ export function generateMelodyByLevel(
   level: number,
   clef: ClefId,
 ): MelodyNote[] {
-  const compound = timeSig === '6/8';
-  const [num, den] = timeSig.split('/').map(Number);
-  const total = compound ? 6 : num * (4 / den);
-
-  const palette: PaletteEntry[] = compound
-    ? [
-        { duration: 'q', units: 2 },
-        { duration: '8', units: 1 },
-      ]
-    : [
-        { duration: 'q', units: 1 },
-        { duration: 'h', units: 2 },
-      ];
-
-  if (level >= 2 && !compound) {
-    palette.push({ duration: 'w', units: 4 });
-    palette.push({ duration: '8', units: 0.5 });
-  }
-  if (level >= 3 && !compound) {
-    palette.push({ duration: 'h', units: 3, dotted: true });
-    palette.push({ duration: 'q', units: 1.5, dotted: true });
-  }
-  if (level >= 6) {
-    palette.push({ duration: '16', units: compound ? 0.5 : 0.25 });
-  }
-
+  const palette = buildPalette(timeSig, level);
+  const capacity = measureCapacityTicks(timeSig);
   const allowTies = level >= 4;
   const allowRests = level >= 5;
   const allowAccidentals = level >= 6;
@@ -398,12 +471,7 @@ export function generateMelodyByLevel(
   const range = [...CLEFS[clef].beginnerRange];
   let prevIdx = Math.floor(Math.random() * range.length);
 
-  const notes: MelodyNote[] = [];
-  let remaining = total;
-  let guard = 64;
-
   const pickPitch = (): { key: string; accidental?: Accidental } => {
-    // Movimiento melódico: predominio del paso por grado.
     const roll = Math.random();
     let nextIdx: number;
     if (roll < 0.55) {
@@ -432,8 +500,12 @@ export function generateMelodyByLevel(
     return { key: baseKey };
   };
 
+  const notes: MelodyNote[] = [];
+  let remaining = capacity;
+  let guard = 64;
+
   while (remaining > 0 && guard-- > 0) {
-    const candidates = palette.filter((p) => p.units <= remaining + 1e-6);
+    const candidates = palette.filter((p) => p.ticks <= remaining);
     if (candidates.length === 0) break;
     const pick = pickRandom(candidates);
     const isRest = allowRests && !pick.dotted && Math.random() < 0.15;
@@ -445,23 +517,21 @@ export function generateMelodyByLevel(
       isRest,
       dotted: pick.dotted,
     });
-    remaining -= pick.units;
+    remaining -= pick.ticks;
   }
 
-  // Rellenos para evitar compases incompletos por redondeos.
-  while (remaining >= 1 - 1e-6) {
-    const p = pickPitch();
-    notes.push({ key: p.key, accidental: p.accidental, duration: 'q', isRest: false });
-    remaining -= 1;
-  }
-  if (remaining >= 0.5 - 1e-6) {
-    const p = pickPitch();
-    notes.push({ key: p.key, accidental: p.accidental, duration: '8', isRest: false });
-    remaining -= 0.5;
-  }
-  if (remaining >= 0.25 - 1e-6) {
-    const p = pickPitch();
-    notes.push({ key: p.key, accidental: p.accidental, duration: '16', isRest: false });
+  // Rellenar exactamente los ticks restantes.
+  let sum = sumRhythmTicks(notes);
+  if (sum < capacity) {
+    for (const entry of fillRemainingTicks(capacity - sum)) {
+      const p = pickPitch();
+      notes.push({
+        key: p.key,
+        accidental: p.accidental,
+        duration: entry.duration,
+        isRest: false,
+      });
+    }
   }
 
   // Ligaduras solo entre notas iguales en afinación.
@@ -478,7 +548,7 @@ export function generateMelodyByLevel(
     }
   }
 
-  return notes;
+  return normalizeMelodyMeasure(timeSig, notes);
 }
 
 /** Genera N compases rítmicos independientes. */

@@ -11,7 +11,7 @@
 // - Cada PlayableNote puede llevar su propia frecuencia (Hz). Si no se da,
 //   se usa A4 (440 Hz), útil para el ejercicio de ritmo puro.
 
-/** Nota tocable (subset común de RhythmNote y MelodyNote). */
+import { rhythmNoteBeats } from './music';
 export interface PlayableNote {
   duration: string;
   isRest: boolean;
@@ -80,17 +80,8 @@ interface LiveSource {
   stopAt: number;
 }
 
-const BEATS_OF: Record<string, number> = {
-  w: 4,
-  h: 2,
-  q: 1,
-  '8': 0.5,
-  '16': 0.25,
-};
-
 function beatsOf(n: PlayableNote): number {
-  const base = BEATS_OF[n.duration] ?? 1;
-  return n.dotted ? base * 1.5 : base;
+  return rhythmNoteBeats(n);
 }
 
 export function schedulePlayback(opts: ScheduleOptions): PlaybackHandle {
