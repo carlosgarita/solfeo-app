@@ -12,9 +12,9 @@ import {
   TEMPO_ORDER,
   type TimeSignature,
   figureNameEs,
-  generateMeasureByLevel,
-  generateMelodyByLevel,
+  generateMelodyMeasures,
   generateNoteExercise,
+  generateRhythmMeasures,
   melodySummaryEs,
   vexKeyToFrequency,
   vexNoteToEnglish,
@@ -37,16 +37,17 @@ export default function App() {
   const [noteLevel, setNoteLevel] = useState(1);
   const [rhythmLevel, setRhythmLevel] = useState(1);
   const [melodyLevel, setMelodyLevel] = useState(1);
+  const [measureCount, setMeasureCount] = useState<number>(1);
 
   // Estado de cada ejercicio
   const [currentNote, setCurrentNote] = useState<NoteExercise>(() =>
     generateNoteExercise('treble', 1),
   );
-  const [currentRhythm, setCurrentRhythm] = useState<RhythmNote[]>(() =>
-    generateMeasureByLevel('4/4', 1),
+  const [currentRhythmMeasures, setCurrentRhythmMeasures] = useState<RhythmNote[][]>(() =>
+    generateRhythmMeasures('4/4', 1, 1),
   );
-  const [currentMelody, setCurrentMelody] = useState<MelodyNote[]>(() =>
-    generateMelodyByLevel('4/4', 1, 'treble'),
+  const [currentMelodyMeasures, setCurrentMelodyMeasures] = useState<MelodyNote[][]>(() =>
+    generateMelodyMeasures('4/4', 1, 1, 'treble'),
   );
   const [revealNote, setRevealNote] = useState(true);
 
@@ -82,13 +83,13 @@ export default function App() {
 
   const nextRhythm = useCallback(() => {
     stopPlayback();
-    setCurrentRhythm(generateMeasureByLevel(timeSig, rhythmLevel));
-  }, [timeSig, rhythmLevel, stopPlayback]);
+    setCurrentRhythmMeasures(generateRhythmMeasures(timeSig, rhythmLevel, measureCount));
+  }, [timeSig, rhythmLevel, measureCount, stopPlayback]);
 
   const nextMelody = useCallback(() => {
     stopPlayback();
-    setCurrentMelody(generateMelodyByLevel(timeSig, melodyLevel, clef));
-  }, [timeSig, melodyLevel, clef, stopPlayback]);
+    setCurrentMelodyMeasures(generateMelodyMeasures(timeSig, melodyLevel, measureCount, clef));
+  }, [timeSig, melodyLevel, measureCount, clef, stopPlayback]);
 
   // Regenerar el ejercicio cuando cambian parámetros relevantes (clave/nivel/compás)
   useEffect(() => {
@@ -102,12 +103,12 @@ export default function App() {
   }, [clef, noteLevel]);
 
   useEffect(() => {
-    setCurrentRhythm(generateMeasureByLevel(timeSig, rhythmLevel));
-  }, [timeSig, rhythmLevel]);
+    setCurrentRhythmMeasures(generateRhythmMeasures(timeSig, rhythmLevel, measureCount));
+  }, [timeSig, rhythmLevel, measureCount]);
 
   useEffect(() => {
-    setCurrentMelody(generateMelodyByLevel(timeSig, melodyLevel, clef));
-  }, [timeSig, melodyLevel, clef]);
+    setCurrentMelodyMeasures(generateMelodyMeasures(timeSig, melodyLevel, measureCount, clef));
+  }, [timeSig, melodyLevel, measureCount, clef]);
 
   const advance = useCallback(() => {
     if (mode === 'note') nextNote();
@@ -171,9 +172,10 @@ export default function App() {
     timeSig,
     rhythmLevel,
     melodyLevel,
+    measureCount,
     pianoGrand,
-    currentRhythm,
-    currentMelody,
+    currentRhythmMeasures,
+    currentMelodyMeasures,
     stopPlayback,
   ]);
 
@@ -193,17 +195,20 @@ export default function App() {
     const [num] = timeSig.split('/').map(Number);
     const countIn = countInOn ? num : 0;
 
-    // Construir las notas reproducibles según el modo.
+    // Aplana todos los compases en un único array de notas (en orden de lectura).
+    const flatRhythm: RhythmNote[] = currentRhythmMeasures.flat();
+    const flatMelody: MelodyNote[] = currentMelodyMeasures.flat();
+
     const playableNotes: PlayableNote[] =
       mode === 'rhythm'
-        ? currentRhythm.map((n) => ({
+        ? flatRhythm.map((n) => ({
             duration: n.duration,
             isRest: n.isRest,
             dotted: n.dotted,
             tiedToNext: n.tiedToNext,
             staccato: n.staccato,
           }))
-        : currentMelody.map((n) => ({
+        : flatMelody.map((n) => ({
             duration: n.duration,
             isRest: n.isRest,
             dotted: n.dotted,
@@ -212,10 +217,10 @@ export default function App() {
             freq: n.isRest || !n.key ? undefined : vexKeyToFrequency(n.key),
           }));
 
-    // Misma fuente para la animación del cursor (deben coincidir 1-a-1
-    // con las posiciones expuestas por el Staff).
+    // Misma fuente para la animación del cursor (coinciden 1-a-1 con
+    // las posiciones expuestas por el Staff).
     const sourceNotes: { duration: string; dotted?: boolean }[] =
-      mode === 'rhythm' ? currentRhythm : currentMelody;
+      mode === 'rhythm' ? flatRhythm : flatMelody;
 
     const handle = schedulePlayback({
       notes: playableNotes,
@@ -235,10 +240,7 @@ export default function App() {
     playbackRef.current = handle;
     setIsPlaying(true);
 
-    // Mapa beatMusical -> X en píxeles.
-    // Las posiciones de las notas en VexFlow no son lineales con el tiempo
-    // (cabeza de la nota está desplazada), así que interpolamos entre el
-    // arranque de cada figura y el de la siguiente / final del compás.
+    // Pre-cálculo: beat de inicio de cada nota.
     const beatsTotal = handle.musicDurationSec / (60 / bpm);
     const noteStartBeats: number[] = [];
     let acc = 0;
@@ -247,41 +249,63 @@ export default function App() {
       const base = { w: 4, h: 2, q: 1, '8': 0.5, '16': 0.25 }[n.duration] ?? 1;
       acc += n.dotted ? base * 1.5 : base;
     }
-    const positions = layout.notePositions;
-    const endX = layout.contentEndX;
 
-    const beatToX = (beat: number): number => {
-      if (positions.length === 0) return layout.contentStartX;
+    const positions = layout.notePositions;
+    const rowHeight = layout.rowHeight;
+
+    // Buscar el borde derecho de la fila donde está la nota i.
+    const rowEndXForY = (y: number): number => {
+      const row = layout.rowEndsX.find((r) => r.y === y);
+      return row ? row.x : positions[positions.length - 1]?.x ?? layout.contentStartX;
+    };
+
+    // Devuelve {x, y} interpolando entre la nota i y la nota i+1.
+    // Si i+1 está en otra fila, interpolamos entre nota i y el final de su fila
+    // (así el cursor recorre visualmente hasta el barline final de esa fila y
+    // el siguiente frame lo transporta al inicio de la fila siguiente).
+    const beatToPos = (beat: number): { x: number; y: number } => {
+      if (positions.length === 0) return { x: layout.contentStartX, y: 10 };
       if (beat <= noteStartBeats[0]) return positions[0];
       for (let i = 0; i < positions.length; i++) {
         const startB = noteStartBeats[i];
         const nextB = i + 1 < positions.length ? noteStartBeats[i + 1] : beatsTotal;
         if (beat >= startB && beat <= nextB) {
-          const startX = positions[i];
-          const nextX = i + 1 < positions.length ? positions[i + 1] : endX;
+          const cur = positions[i];
+          const nxt = i + 1 < positions.length ? positions[i + 1] : null;
           const t = nextB === startB ? 0 : (beat - startB) / (nextB - startB);
-          return startX + (nextX - startX) * t;
+          if (!nxt || nxt.y !== cur.y) {
+            const endX = rowEndXForY(cur.y);
+            return { x: cur.x + (endX - cur.x) * t, y: cur.y };
+          }
+          return { x: cur.x + (nxt.x - cur.x) * t, y: cur.y };
         }
       }
-      return endX;
+      const last = positions[positions.length - 1];
+      return { x: rowEndXForY(last.y), y: last.y };
     };
 
     const tick = () => {
       const cur = handle.ctx.currentTime;
       const elapsedFromMusic = cur - handle.musicStartTime;
+      const first = positions[0] ?? { x: layout.contentStartX, y: 10 };
       if (cur < handle.musicStartTime) {
-        // Cuenta atrás: cursor justo antes de la primera nota, parpadeando.
-        staffRef.current?.setPlayhead(layout.contentStartX);
+        staffRef.current?.setPlayhead({ x: first.x, y: first.y, height: rowHeight });
       } else if (elapsedFromMusic >= handle.musicDurationSec) {
-        staffRef.current?.setPlayhead(endX);
+        const last = positions[positions.length - 1] ?? first;
+        staffRef.current?.setPlayhead({
+          x: rowEndXForY(last.y),
+          y: last.y,
+          height: rowHeight,
+        });
       } else {
         const beat = elapsedFromMusic / (60 / bpm);
-        staffRef.current?.setPlayhead(beatToX(beat));
+        const p = beatToPos(beat);
+        staffRef.current?.setPlayhead({ x: p.x, y: p.y, height: rowHeight });
       }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [bpm, countInOn, currentRhythm, currentMelody, isPlaying, mode, timeSig]);
+  }, [bpm, countInOn, currentRhythmMeasures, currentMelodyMeasures, isPlaying, mode, timeSig]);
 
   const togglePlayback = useCallback(() => {
     if (isPlaying) stopPlayback();
@@ -289,10 +313,16 @@ export default function App() {
   }, [isPlaying, startPlayback, stopPlayback]);
 
   const rhythmSummary = useMemo(() => {
-    return currentRhythm.map((n) => figureNameEs(n)).join(' · ');
-  }, [currentRhythm]);
+    // Muestra cada compás separado con " | ".
+    return currentRhythmMeasures
+      .map((m) => m.map((n) => figureNameEs(n)).join(' · '))
+      .join(' │ ');
+  }, [currentRhythmMeasures]);
 
-  const melodySummary = useMemo(() => melodySummaryEs(currentMelody), [currentMelody]);
+  const melodySummary = useMemo(
+    () => currentMelodyMeasures.map((m) => melodySummaryEs(m)).join(' │ '),
+    [currentMelodyMeasures],
+  );
 
   return (
     <div className="app">
@@ -343,6 +373,7 @@ export default function App() {
           noteLevel={noteLevel}
           rhythmLevel={rhythmLevel}
           melodyLevel={melodyLevel}
+          measureCount={measureCount}
           countInOn={countInOn}
           onClefChange={setClef}
           onTimeSigChange={setTimeSig}
@@ -351,6 +382,7 @@ export default function App() {
           onNoteLevelChange={setNoteLevel}
           onRhythmLevelChange={setRhythmLevel}
           onMelodyLevelChange={setMelodyLevel}
+          onMeasureCountChange={setMeasureCount}
           onCountInChange={setCountInOn}
         />
 
@@ -454,8 +486,8 @@ export default function App() {
               mode={mode}
               noteKey={mode === 'note' ? currentNote.key : undefined}
               noteAccidental={mode === 'note' ? currentNote.accidental : undefined}
-              rhythm={mode === 'rhythm' ? currentRhythm : undefined}
-              melody={mode === 'melody' ? currentMelody : undefined}
+              rhythmMeasures={mode === 'rhythm' ? currentRhythmMeasures : undefined}
+              melodyMeasures={mode === 'melody' ? currentMelodyMeasures : undefined}
               onLayout={handleStaffLayout}
             />
           </div>

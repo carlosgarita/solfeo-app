@@ -7,6 +7,7 @@ import {
   Formatter,
   Accidental,
   Articulation,
+  Barline,
   Dot,
   Modifier,
   StaveTie,
@@ -20,21 +21,28 @@ import type {
 } from '../lib/music';
 
 export interface StaffLayout {
-  /** Ancho total del SVG en píxeles. */
   width: number;
-  /** Alto total del SVG en píxeles. */
   height: number;
-  /** Posición X (en px) donde el cursor entra a la zona musical (después de la clave/compás). */
+  /** Posición X (px) donde el cursor entra a la zona musical (después de la clave/compás). */
   contentStartX: number;
-  /** Posición X (en px) donde termina la zona musical (final del stave). */
-  contentEndX: number;
-  /** Posición X (en px) absoluta del ataque de cada nota del ritmo. */
-  notePositions: number[];
+  /** Posición del ataque de cada nota (en orden de lectura). */
+  notePositions: { x: number; y: number }[];
+  /** Para cada fila del pentagrama: la X del borde derecho del último compás y su Y. */
+  rowEndsX: { x: number; y: number }[];
+  /** Altura visible del pentagrama en píxeles (para dimensionar el cursor). */
+  rowHeight: number;
+}
+
+export interface PlayheadPosition {
+  x: number;
+  y: number;
+  /** Altura opcional. Si se omite, se usa la que se dio en el layout. */
+  height?: number;
 }
 
 export interface StaffHandle {
-  /** Mueve el cursor (playhead) a la posición X dada (en px). Pasa `null` para ocultarlo. */
-  setPlayhead: (x: number | null) => void;
+  /** Mueve el cursor (playhead) a la posición 2D dada. `null` lo oculta. */
+  setPlayhead: (pos: PlayheadPosition | null) => void;
 }
 
 interface StaffProps {
@@ -42,14 +50,15 @@ interface StaffProps {
   pianoGrand: boolean;
   timeSig: TimeSignature;
   mode: 'note' | 'rhythm' | 'melody';
-  /** Modo nota: clave VexFlow ej. "c/4" o "c#/4". */
+  /** Modo nota: clave VexFlow (ej. "c/4"). */
   noteKey?: string;
   /** Alteración explícita (necesaria para becuadros; redundante para # y b). */
   noteAccidental?: AccidentalSym;
-  rhythm?: RhythmNote[];
+  /** Modo ritmo: array de compases. */
+  rhythmMeasures?: RhythmNote[][];
   rhythmNoteKey?: string;
-  melody?: MelodyNote[];
-  /** Se llama tras renderizar el SVG con el layout para sincronizar el cursor externo. */
+  /** Modo melodía: array de compases. */
+  melodyMeasures?: MelodyNote[][];
   onLayout?: (layout: StaffLayout) => void;
 }
 
@@ -62,6 +71,13 @@ const VEX_CLEF: Record<ClefId, 'treble' | 'bass' | 'alto'> = {
 const MIN_STAVE_WIDTH = 220;
 const MAX_STAVE_WIDTH = 560;
 const STAVE_HEIGHT = 120;
+const ROW_GAP = 24;
+/** Ancho mínimo para un compás legible (sin la clave). */
+const MIN_MEASURE_WIDTH = 150;
+/** Espacio extra reservado en la primera fila para clave + signatura de compás. */
+const FIRST_ROW_CLEF_EXTRA = 60;
+/** Espacio extra reservado al inicio de cada fila posterior para la clave. */
+const OTHER_ROW_CLEF_EXTRA = 40;
 
 export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
   {
@@ -71,9 +87,9 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     mode,
     noteKey,
     noteAccidental,
-    rhythm,
+    rhythmMeasures,
     rhythmNoteKey,
-    melody,
+    melodyMeasures,
     onLayout,
   },
   ref,
@@ -86,23 +102,22 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
   useImperativeHandle(
     ref,
     () => ({
-      setPlayhead(x: number | null) {
+      setPlayhead(pos: PlayheadPosition | null) {
         const el = playheadRef.current;
         if (!el) return;
-        if (x == null) {
+        if (pos == null) {
           el.style.opacity = '0';
         } else {
           el.style.opacity = '1';
-          el.style.transform = `translateX(${x}px)`;
+          el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+          if (pos.height != null) el.style.height = `${pos.height}px`;
         }
       },
     }),
     [],
   );
 
-  // Observar el ancho disponible para que el pentagrama nunca exceda el contenedor.
-  // Medimos el padre (.score-card) y restamos su padding REAL (no estimado),
-  // porque el wrapper se autoajusta al SVG.
+  // Observa el ancho del padre (.score-card) y actualiza containerWidth.
   useEffect(() => {
     const host = wrapperRef.current;
     if (!host) return;
@@ -130,74 +145,150 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
       MIN_STAVE_WIDTH,
       Math.min(MAX_STAVE_WIDTH, Math.floor(containerWidth)),
     );
-    const totalHeight = pianoGrand ? STAVE_HEIGHT * 2 + 20 : STAVE_HEIGHT + 20;
+
+    const [num, den] = timeSig.split('/').map(Number);
+    const showTimeSig = mode === 'rhythm' || mode === 'melody';
+
+    // Determinar la fuente de compases según el modo.
+    const measures: (RhythmNote[] | MelodyNote[])[] =
+      mode === 'rhythm'
+        ? rhythmMeasures ?? []
+        : mode === 'melody'
+          ? melodyMeasures ?? []
+          : [[] as RhythmNote[]]; // modo nota: un "compás" con la nota única.
+    const measureCount = Math.max(1, measures.length);
+
+    // Calcular cuántos compases caben por fila.
+    // La 1ª fila tiene menos espacio útil (clave + signatura); las demás solo clave.
+    const usable = staveWidth - 20;
+    // Estimamos: la 1ª fila necesita FIRST_ROW_CLEF_EXTRA extras para clave+compás.
+    // Compases por fila = floor((usable - clefExtra) / MIN_MEASURE_WIDTH).
+    const measuresPerRowFirst = Math.max(
+      1,
+      Math.floor((usable - FIRST_ROW_CLEF_EXTRA) / MIN_MEASURE_WIDTH) + 1,
+    );
+    const measuresPerRowOther = Math.max(
+      1,
+      Math.floor((usable - OTHER_ROW_CLEF_EXTRA) / MIN_MEASURE_WIDTH) + 1,
+    );
+
+    // Distribuye compases por filas.
+    const rows: number[][] = [];
+    let idx = 0;
+    while (idx < measureCount) {
+      const rowIsFirst = rows.length === 0;
+      const cap = rowIsFirst ? measuresPerRowFirst : measuresPerRowOther;
+      const chunk: number[] = [];
+      for (let k = 0; k < cap && idx < measureCount; k++) chunk.push(idx++);
+      rows.push(chunk);
+    }
+
+    const rowStaveHeight = pianoGrand ? STAVE_HEIGHT * 2 : STAVE_HEIGHT;
+    const totalHeight = rows.length * rowStaveHeight + (rows.length - 1) * ROW_GAP + 30;
+
     const renderer = new Renderer(host, Renderer.Backends.SVG);
     renderer.resize(staveWidth, totalHeight);
     const ctx = renderer.getContext();
     ctx.setFont('Arial', 12);
 
-    const [num, den] = timeSig.split('/').map(Number);
-    const showTimeSig = mode === 'rhythm' || mode === 'melody';
-
-    // ---- Pentagrama superior ----
     const topClef = VEX_CLEF[clef];
-    const topStave = new Stave(10, 10, staveWidth - 20);
-    topStave.addClef(topClef);
-    if (showTimeSig) topStave.addTimeSignature(timeSig);
-    topStave.setContext(ctx).draw();
+    const notePositions: { x: number; y: number }[] = [];
+    const rowEndsX: { x: number; y: number }[] = [];
+    let contentStartX = 10;
+    let currentY = 10;
 
-    const top = buildNotes({
-      mode,
-      noteKey,
-      noteAccidental,
-      rhythm,
-      rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
-      melody,
-      clefForNotes: topClef,
-      pianoGrand,
-      whichStaff: 'top',
-    });
-    drawVoiceAndTies(ctx, topStave, top.notes, top.ties, num, den, staveWidth);
+    for (let r = 0; r < rows.length; r++) {
+      const rowMeasures = rows[r];
+      const isFirstRow = r === 0;
+      const clefExtra = isFirstRow ? FIRST_ROW_CLEF_EXTRA : OTHER_ROW_CLEF_EXTRA;
+      const rowStartX = 10;
+      const rowUsableForMeasures = usable - clefExtra;
+      const measureWidth = rowUsableForMeasures / rowMeasures.length;
 
-    // ---- Pentagrama inferior (modo piano) ----
-    if (pianoGrand) {
-      const bottomStave = new Stave(10, STAVE_HEIGHT + 10, staveWidth - 20);
-      bottomStave.addClef('bass');
-      if (showTimeSig) bottomStave.addTimeSignature(timeSig);
-      bottomStave.setContext(ctx).draw();
+      for (let ci = 0; ci < rowMeasures.length; ci++) {
+        const mIdx = rowMeasures[ci];
+        const isFirstInRow = ci === 0;
+        const isLastMeasureOverall = mIdx === measureCount - 1;
+        // Sólo el primer compás de la fila lleva el "clef extra".
+        const x =
+          isFirstInRow
+            ? rowStartX
+            : rowStartX + clefExtra + ci * measureWidth;
+        const width = isFirstInRow ? clefExtra + measureWidth : measureWidth;
+        const y = currentY;
 
-      const bottom = buildNotes({
-        mode,
-        noteKey,
-        noteAccidental,
-        rhythm,
-        rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
-        melody,
-        clefForNotes: 'bass',
-        pianoGrand,
-        whichStaff: 'bottom',
-      });
-      drawVoiceAndTies(ctx, bottomStave, bottom.notes, bottom.ties, num, den, staveWidth);
+        // Pentagrama superior.
+        const topStave = new Stave(x, y, width);
+        if (isFirstInRow) topStave.addClef(topClef);
+        if (isFirstRow && isFirstInRow && showTimeSig) topStave.addTimeSignature(timeSig);
+        if (isLastMeasureOverall) topStave.setEndBarType(Barline.type.END);
+        topStave.setContext(ctx).draw();
+
+        if (isFirstInRow && isFirstRow) {
+          contentStartX = topStave.getNoteStartX();
+        }
+
+        const topBuilt = buildNotes({
+          mode,
+          noteKey,
+          noteAccidental,
+          rhythm: mode === 'rhythm' ? (measures[mIdx] as RhythmNote[]) : undefined,
+          rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
+          melody: mode === 'melody' ? (measures[mIdx] as MelodyNote[]) : undefined,
+          clefForNotes: topClef,
+          pianoGrand,
+          whichStaff: 'top',
+        });
+        drawVoiceAndTies(ctx, topStave, topBuilt.notes, topBuilt.ties, num, den, width);
+
+        // Posiciones para el cursor (incluye silencios: el cursor debe pasar por ellos).
+        // Sólo consideramos las notas del stave superior para el cursor.
+        if (mode === 'rhythm' || mode === 'melody') {
+          for (const n of topBuilt.notes) {
+            notePositions.push({ x: n.getAbsoluteX(), y });
+          }
+        }
+
+        // Pentagrama inferior (piano grand).
+        if (pianoGrand) {
+          const bottomStave = new Stave(x, y + STAVE_HEIGHT, width);
+          if (isFirstInRow) bottomStave.addClef('bass');
+          if (isFirstRow && isFirstInRow && showTimeSig) bottomStave.addTimeSignature(timeSig);
+          if (isLastMeasureOverall) bottomStave.setEndBarType(Barline.type.END);
+          bottomStave.setContext(ctx).draw();
+
+          const bottomBuilt = buildNotes({
+            mode,
+            noteKey,
+            noteAccidental,
+            rhythm: mode === 'rhythm' ? (measures[mIdx] as RhythmNote[]) : undefined,
+            rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
+            melody: mode === 'melody' ? (measures[mIdx] as MelodyNote[]) : undefined,
+            clefForNotes: 'bass',
+            pianoGrand,
+            whichStaff: 'bottom',
+          });
+          drawVoiceAndTies(ctx, bottomStave, bottomBuilt.notes, bottomBuilt.ties, num, den, width);
+        }
+
+        // Fin de fila: X extrema derecha del último compás de la fila.
+        if (ci === rowMeasures.length - 1) {
+          rowEndsX.push({ x: x + width, y });
+        }
+      }
+
+      currentY += rowStaveHeight + ROW_GAP;
     }
 
-    // Exponer el layout (posiciones X de cada nota) para que el padre pueda
-    // sincronizar el cursor (playhead) con el audio.
+    // Exponer layout.
     if (onLayout) {
-      const notePositions =
-        mode === 'rhythm' || mode === 'melody'
-          ? top.notes.map((n) => n.getAbsoluteX())
-          : [];
-      const contentStartX =
-        notePositions.length > 0
-          ? notePositions[0]
-          : topStave.getNoteStartX();
-      const contentEndX = topStave.getNoteEndX();
       onLayout({
         width: staveWidth,
         height: totalHeight,
         contentStartX,
-        contentEndX,
         notePositions,
+        rowEndsX,
+        rowHeight: rowStaveHeight,
       });
     }
   }, [
@@ -207,9 +298,9 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     mode,
     noteKey,
     noteAccidental,
-    rhythm,
+    rhythmMeasures,
     rhythmNoteKey,
-    melody,
+    melodyMeasures,
     containerWidth,
     onLayout,
   ]);
@@ -221,7 +312,7 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
         ref={playheadRef}
         className="vexflow-playhead"
         aria-hidden="true"
-        style={{ opacity: 0, transform: 'translateX(0px)' }}
+        style={{ opacity: 0, transform: 'translate(0px, 0px)', height: `${STAVE_HEIGHT}px` }}
       />
     </div>
   );
@@ -234,13 +325,13 @@ function drawVoiceAndTies(
   ties: StaveTie[],
   numBeats: number,
   beatValue: number,
-  staveWidth: number,
+  measureWidth: number,
 ) {
   if (notes.length === 0) return;
   const voice = new Voice({ num_beats: numBeats, beat_value: beatValue });
   voice.setStrict(false);
   voice.addTickables(notes);
-  new Formatter().joinVoices([voice]).format([voice], Math.max(120, staveWidth - 120));
+  new Formatter().joinVoices([voice]).format([voice], Math.max(80, measureWidth - 40));
   voice.draw(ctx, stave);
   ties.forEach((t) => t.setContext(ctx).draw());
 }
@@ -277,7 +368,6 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
 
   if (mode === 'melody') {
     if (!melody || melody.length === 0) return { notes: [], ties: [] };
-    // En modo melodía dibujamos siempre en el stave superior (con la clave elegida).
     if (pianoGrand && whichStaff === 'bottom') return { notes: [], ties: [] };
 
     const restKey = defaultRhythmKey(clefForNotes);
@@ -322,7 +412,6 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
     if (pianoGrand) {
       const octave = parseInt(noteKey.split('/')[1], 10);
       const letter = noteKey.split('/')[0].toLowerCase();
-      // Heurística: C4 (do central) y todo lo de arriba va al pentagrama de Sol.
       const goesTop = octave >= 4 && !(octave === 4 && letter === 'c' && false);
       const shouldDraw = whichStaff === 'top' ? goesTop : !goesTop;
       if (!shouldDraw) return { notes: [], ties: [] };

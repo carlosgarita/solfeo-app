@@ -1,5 +1,12 @@
 import type { ClefId, TimeSignature } from '../lib/music';
-import { CLEFS, MELODY_LEVELS, NOTE_LEVELS, RHYTHM_LEVELS, TIME_SIGNATURES } from '../lib/music';
+import {
+  CLEFS,
+  MEASURE_COUNT_OPTIONS,
+  MELODY_LEVELS,
+  NOTE_LEVELS,
+  RHYTHM_LEVELS,
+  TIME_SIGNATURES,
+} from '../lib/music';
 
 type Mode = 'note' | 'rhythm' | 'melody';
 
@@ -12,6 +19,7 @@ interface SidebarProps {
   noteLevel: number;
   rhythmLevel: number;
   melodyLevel: number;
+  measureCount: number;
   countInOn: boolean;
   onClefChange: (c: ClefId) => void;
   onTimeSigChange: (t: TimeSignature) => void;
@@ -20,6 +28,7 @@ interface SidebarProps {
   onNoteLevelChange: (v: number) => void;
   onRhythmLevelChange: (v: number) => void;
   onMelodyLevelChange: (v: number) => void;
+  onMeasureCountChange: (v: number) => void;
   onCountInChange: (v: boolean) => void;
 }
 
@@ -33,6 +42,7 @@ export function Sidebar(props: SidebarProps) {
     noteLevel,
     rhythmLevel,
     melodyLevel,
+    measureCount,
     countInOn,
     onClefChange,
     onTimeSigChange,
@@ -41,6 +51,7 @@ export function Sidebar(props: SidebarProps) {
     onNoteLevelChange,
     onRhythmLevelChange,
     onMelodyLevelChange,
+    onMeasureCountChange,
     onCountInChange,
   } = props;
 
@@ -114,6 +125,27 @@ export function Sidebar(props: SidebarProps) {
           <p className="hint">El compás se usa en las prácticas de tiempos y melodía.</p>
         )}
       </div>
+
+      {mode !== 'note' && (
+        <div className="field">
+          <label htmlFor="measures">Compases por ejercicio</label>
+          <select
+            id="measures"
+            className="select"
+            value={measureCount}
+            onChange={(e) => onMeasureCountChange(Number(e.target.value))}
+          >
+            {MEASURE_COUNT_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? '1 compás' : `${n} compases`}
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            Se generan varios compases seguidos y el cursor los recorre en orden.
+          </p>
+        </div>
+      )}
 
       <div className="field">
         <label className="checkbox">

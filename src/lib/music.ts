@@ -156,6 +156,8 @@ export const RHYTHM_LEVELS: LevelInfo[] = [
   { id: 6, label: 'Nivel 6 · + Semicorcheas', description: 'Se incluyen semicorcheas (figuras más rápidas).' },
 ];
 
+export const MEASURE_COUNT_OPTIONS = [1, 2, 4, 8] as const;
+
 export const MELODY_LEVELS: LevelInfo[] = [
   { id: 1, label: 'Nivel 1 · Notas y figuras simples', description: 'Notas naturales del pentagrama con negras y blancas.' },
   { id: 2, label: 'Nivel 2 · + Corcheas y redondas', description: 'Se añaden corcheas y figuras largas.' },
@@ -477,6 +479,35 @@ export function generateMelodyByLevel(
   }
 
   return notes;
+}
+
+/** Genera N compases rítmicos independientes. */
+export function generateRhythmMeasures(
+  timeSig: TimeSignature,
+  level: number,
+  count: number,
+): RhythmNote[][] {
+  const n = Math.max(1, Math.floor(count));
+  const out: RhythmNote[][] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(generateMeasureByLevel(timeSig, level));
+  }
+  return out;
+}
+
+/** Genera N compases melódicos independientes. */
+export function generateMelodyMeasures(
+  timeSig: TimeSignature,
+  level: number,
+  count: number,
+  clef: ClefId,
+): MelodyNote[][] {
+  const n = Math.max(1, Math.floor(count));
+  const out: MelodyNote[][] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(generateMelodyByLevel(timeSig, level, clef));
+  }
+  return out;
 }
 
 /** Resumen textual de una melodía: "Do (negra) · Re♯ (corchea) · …" */
