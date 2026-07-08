@@ -1,4 +1,10 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import {
   Renderer,
   Stave,
@@ -11,14 +17,14 @@ import {
   Dot,
   Modifier,
   StaveTie,
-} from 'vexflow';
+} from "vexflow";
 import type {
   Accidental as AccidentalSym,
   ClefId,
   MelodyNote,
   RhythmNote,
   TimeSignature,
-} from '../lib/music';
+} from "../lib/music";
 
 export interface StaffLayout {
   width: number;
@@ -49,7 +55,7 @@ interface StaffProps {
   clef: ClefId;
   pianoGrand: boolean;
   timeSig: TimeSignature;
-  mode: 'note' | 'rhythm' | 'melody';
+  mode: "note" | "rhythm" | "melody";
   /** Modo nota: clave VexFlow (ej. "c/4"). */
   noteKey?: string;
   /** Alteración explícita (necesaria para becuadros; redundante para # y b). */
@@ -62,10 +68,10 @@ interface StaffProps {
   onLayout?: (layout: StaffLayout) => void;
 }
 
-const VEX_CLEF: Record<ClefId, 'treble' | 'bass' | 'alto'> = {
-  treble: 'treble',
-  bass: 'bass',
-  alto: 'alto',
+const VEX_CLEF: Record<ClefId, "treble" | "bass" | "alto"> = {
+  treble: "treble",
+  bass: "bass",
+  alto: "alto",
 };
 
 const MIN_STAVE_WIDTH = 220;
@@ -78,18 +84,29 @@ const MIN_MEASURE_WIDTH = 160;
 const FIRST_MEASURE_CLEF_EXTRA = 72;
 
 /** Cuántos compases caben en una fila respetando MIN_MEASURE_WIDTH. */
-function measuresPerRowFor(usableWidth: number, clefExtra: number, remaining: number): number {
+function measuresPerRowFor(
+  usableWidth: number,
+  clefExtra: number,
+  remaining: number,
+): number {
   const musicWidth = Math.max(MIN_MEASURE_WIDTH, usableWidth - clefExtra);
   const maxByWidth = Math.max(1, Math.floor(musicWidth / MIN_MEASURE_WIDTH));
   return Math.min(remaining, maxByWidth);
 }
 
 /** Reparte índices de compases en filas. */
-function buildMeasureRows(measureCount: number, usableWidth: number): number[][] {
+function buildMeasureRows(
+  measureCount: number,
+  usableWidth: number,
+): number[][] {
   const rows: number[][] = [];
   let idx = 0;
   while (idx < measureCount) {
-    const cap = measuresPerRowFor(usableWidth, FIRST_MEASURE_CLEF_EXTRA, measureCount - idx);
+    const cap = measuresPerRowFor(
+      usableWidth,
+      FIRST_MEASURE_CLEF_EXTRA,
+      measureCount - idx,
+    );
     const chunk: number[] = [];
     for (let k = 0; k < cap && idx < measureCount; k++) chunk.push(idx++);
     rows.push(chunk);
@@ -124,9 +141,9 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
         const el = playheadRef.current;
         if (!el) return;
         if (pos == null) {
-          el.style.opacity = '0';
+          el.style.opacity = "0";
         } else {
-          el.style.opacity = '1';
+          el.style.opacity = "1";
           el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
           if (pos.height != null) el.style.height = `${pos.height}px`;
         }
@@ -156,21 +173,21 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
   useEffect(() => {
     const host = svgHostRef.current;
     if (!host) return;
-    host.innerHTML = '';
+    host.innerHTML = "";
 
     const staveWidth = Math.max(
       MIN_STAVE_WIDTH,
       Math.min(MAX_STAVE_WIDTH, Math.floor(containerWidth)),
     );
 
-    const [num, den] = timeSig.split('/').map(Number);
-    const showTimeSig = mode === 'rhythm' || mode === 'melody';
+    const [num, den] = timeSig.split("/").map(Number);
+    const showTimeSig = mode === "rhythm" || mode === "melody";
 
     const measures: (RhythmNote[] | MelodyNote[])[] =
-      mode === 'rhythm'
-        ? rhythmMeasures ?? []
-        : mode === 'melody'
-          ? melodyMeasures ?? []
+      mode === "rhythm"
+        ? (rhythmMeasures ?? [])
+        : mode === "melody"
+          ? (melodyMeasures ?? [])
           : [[] as RhythmNote[]];
     if (measures.length === 0) return;
     const measureCount = measures.length;
@@ -179,12 +196,13 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
     const rows = buildMeasureRows(measureCount, usable);
 
     const rowStaveHeight = pianoGrand ? STAVE_HEIGHT * 2 : STAVE_HEIGHT;
-    const totalHeight = rows.length * rowStaveHeight + (rows.length - 1) * ROW_GAP + 30;
+    const totalHeight =
+      rows.length * rowStaveHeight + (rows.length - 1) * ROW_GAP + 30;
 
     const renderer = new Renderer(host, Renderer.Backends.SVG);
     renderer.resize(staveWidth, totalHeight);
     const ctx = renderer.getContext();
-    ctx.setFont('Arial', 12);
+    ctx.setFont("Arial", 12);
 
     const topClef = VEX_CLEF[clef];
     const notePositions: { x: number; y: number }[] = [];
@@ -207,12 +225,15 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
         const x = isFirstInRow
           ? rowStartX
           : rowStartX + FIRST_MEASURE_CLEF_EXTRA + ci * measureWidth;
-        const width = isFirstInRow ? FIRST_MEASURE_CLEF_EXTRA + measureWidth : measureWidth;
+        const width = isFirstInRow
+          ? FIRST_MEASURE_CLEF_EXTRA + measureWidth
+          : measureWidth;
         const y = currentY;
 
         const topStave = new Stave(x, y, width);
         if (isFirstInRow) topStave.addClef(topClef);
-        if (isFirstRow && isFirstInRow && showTimeSig) topStave.addTimeSignature(timeSig);
+        if (isFirstRow && isFirstInRow && showTimeSig)
+          topStave.addTimeSignature(timeSig);
         topStave.setEndBarType(
           isLastMeasureOverall ? Barline.type.END : Barline.type.SINGLE,
         );
@@ -226,16 +247,25 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
           mode,
           noteKey,
           noteAccidental,
-          rhythm: mode === 'rhythm' ? (measures[mIdx] as RhythmNote[]) : undefined,
+          rhythm:
+            mode === "rhythm" ? (measures[mIdx] as RhythmNote[]) : undefined,
           rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
-          melody: mode === 'melody' ? (measures[mIdx] as MelodyNote[]) : undefined,
+          melody:
+            mode === "melody" ? (measures[mIdx] as MelodyNote[]) : undefined,
           clefForNotes: topClef,
           pianoGrand,
-          whichStaff: 'top',
+          whichStaff: "top",
         });
-        drawVoiceAndTies(ctx, topStave, topBuilt.notes, topBuilt.ties, num, den);
+        drawVoiceAndTies(
+          ctx,
+          topStave,
+          topBuilt.notes,
+          topBuilt.ties,
+          num,
+          den,
+        );
 
-        if (mode === 'rhythm' || mode === 'melody') {
+        if (mode === "rhythm" || mode === "melody") {
           for (const n of topBuilt.notes) {
             notePositions.push({ x: n.getAbsoluteX(), y });
           }
@@ -243,8 +273,9 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
 
         if (pianoGrand) {
           const bottomStave = new Stave(x, y + STAVE_HEIGHT, width);
-          if (isFirstInRow) bottomStave.addClef('bass');
-          if (isFirstRow && isFirstInRow && showTimeSig) bottomStave.addTimeSignature(timeSig);
+          if (isFirstInRow) bottomStave.addClef("bass");
+          if (isFirstRow && isFirstInRow && showTimeSig)
+            bottomStave.addTimeSignature(timeSig);
           bottomStave.setEndBarType(
             isLastMeasureOverall ? Barline.type.END : Barline.type.SINGLE,
           );
@@ -254,14 +285,23 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
             mode,
             noteKey,
             noteAccidental,
-            rhythm: mode === 'rhythm' ? (measures[mIdx] as RhythmNote[]) : undefined,
+            rhythm:
+              mode === "rhythm" ? (measures[mIdx] as RhythmNote[]) : undefined,
             rhythmNoteKey: rhythmNoteKey ?? defaultRhythmKey(clef),
-            melody: mode === 'melody' ? (measures[mIdx] as MelodyNote[]) : undefined,
-            clefForNotes: 'bass',
+            melody:
+              mode === "melody" ? (measures[mIdx] as MelodyNote[]) : undefined,
+            clefForNotes: "bass",
             pianoGrand,
-            whichStaff: 'bottom',
+            whichStaff: "bottom",
           });
-          drawVoiceAndTies(ctx, bottomStave, bottomBuilt.notes, bottomBuilt.ties, num, den);
+          drawVoiceAndTies(
+            ctx,
+            bottomStave,
+            bottomBuilt.notes,
+            bottomBuilt.ties,
+            num,
+            den,
+          );
         }
 
         if (ci === rowMeasures.length - 1) {
@@ -303,14 +343,18 @@ export const Staff = forwardRef<StaffHandle, StaffProps>(function Staff(
         ref={playheadRef}
         className="vexflow-playhead"
         aria-hidden="true"
-        style={{ opacity: 0, transform: 'translate(0px, 0px)', height: `${STAVE_HEIGHT}px` }}
+        style={{
+          opacity: 0,
+          transform: "translate(0px, 0px)",
+          height: `${STAVE_HEIGHT}px`,
+        }}
       />
     </div>
   );
 });
 
 function drawVoiceAndTies(
-  ctx: ReturnType<Renderer['getContext']>,
+  ctx: ReturnType<Renderer["getContext"]>,
   stave: Stave,
   notes: StaveNote[],
   ties: StaveTie[],
@@ -326,20 +370,20 @@ function drawVoiceAndTies(
     voice.draw(ctx, stave);
     ties.forEach((t) => t.setContext(ctx).draw());
   } catch (err) {
-    console.warn('[Staff] Error al dibujar compás:', err);
+    console.warn("[Staff] Error al dibujar compás:", err);
   }
 }
 
 interface BuildOpts {
-  mode: 'note' | 'rhythm' | 'melody';
+  mode: "note" | "rhythm" | "melody";
   noteKey?: string;
   noteAccidental?: AccidentalSym;
   rhythm?: RhythmNote[];
   rhythmNoteKey: string;
   melody?: MelodyNote[];
-  clefForNotes: 'treble' | 'bass' | 'alto';
+  clefForNotes: "treble" | "bass" | "alto";
   pianoGrand: boolean;
-  whichStaff: 'top' | 'bottom';
+  whichStaff: "top" | "bottom";
 }
 
 interface BuiltStaff {
@@ -360,16 +404,17 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
     whichStaff,
   } = opts;
 
-  if (mode === 'melody') {
+  if (mode === "melody") {
     if (!melody || melody.length === 0) return { notes: [], ties: [] };
-    if (pianoGrand && whichStaff === 'bottom') return { notes: [], ties: [] };
+    if (pianoGrand && whichStaff === "bottom") return { notes: [], ties: [] };
 
     const restKey = defaultRhythmKey(clefForNotes);
     const notes: StaveNote[] = melody.map((n) => {
       const sn = new StaveNote({
         clef: clefForNotes,
-        keys: [n.isRest ? restKey : n.key ?? restKey],
+        keys: [n.isRest ? restKey : (n.key ?? restKey)],
         duration: n.isRest ? `${n.duration}r` : n.duration,
+        dots: n.dotted && !n.isRest ? 1 : undefined,
       });
       if (!n.isRest && n.accidental) {
         sn.addModifier(new Accidental(n.accidental), 0);
@@ -378,7 +423,7 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
         Dot.buildAndAttach([sn], { all: true });
       }
       if (n.staccato && !n.isRest) {
-        const artic = new Articulation('a.');
+        const artic = new Articulation("a.");
         artic.setPosition(Modifier.Position.BELOW);
         sn.addModifier(artic, 0);
       }
@@ -401,19 +446,19 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
     return { notes, ties };
   }
 
-  if (mode === 'note') {
+  if (mode === "note") {
     if (!noteKey) return { notes: [], ties: [] };
     if (pianoGrand) {
-      const octave = parseInt(noteKey.split('/')[1], 10);
-      const letter = noteKey.split('/')[0].toLowerCase();
-      const goesTop = octave >= 4 && !(octave === 4 && letter === 'c' && false);
-      const shouldDraw = whichStaff === 'top' ? goesTop : !goesTop;
+      const octave = parseInt(noteKey.split("/")[1], 10);
+      const letter = noteKey.split("/")[0].toLowerCase();
+      const goesTop = octave >= 4 && !(octave === 4 && letter === "c" && false);
+      const shouldDraw = whichStaff === "top" ? goesTop : !goesTop;
       if (!shouldDraw) return { notes: [], ties: [] };
     }
     const sn = new StaveNote({
       clef: clefForNotes,
       keys: [noteKey],
-      duration: 'w',
+      duration: "w",
     });
     if (noteAccidental) {
       sn.addModifier(new Accidental(noteAccidental), 0);
@@ -422,19 +467,20 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
   }
 
   if (!rhythm || rhythm.length === 0) return { notes: [], ties: [] };
-  if (pianoGrand && whichStaff === 'bottom') return { notes: [], ties: [] };
+  if (pianoGrand && whichStaff === "bottom") return { notes: [], ties: [] };
 
   const notes: StaveNote[] = rhythm.map((r) => {
     const sn = new StaveNote({
       clef: clefForNotes,
       keys: [rhythmNoteKey],
       duration: r.isRest ? `${r.duration}r` : r.duration,
+      dots: r.dotted && !r.isRest ? 1 : undefined,
     });
     if (r.dotted && !r.isRest) {
       Dot.buildAndAttach([sn], { all: true });
     }
     if (r.staccato && !r.isRest) {
-      const artic = new Articulation('a.');
+      const artic = new Articulation("a.");
       artic.setPosition(Modifier.Position.BELOW);
       sn.addModifier(artic, 0);
     }
@@ -460,11 +506,11 @@ function buildNotes(opts: BuildOpts): BuiltStaff {
 
 function defaultRhythmKey(clef: ClefId): string {
   switch (clef) {
-    case 'treble':
-      return 'b/4';
-    case 'bass':
-      return 'd/3';
-    case 'alto':
-      return 'c/4';
+    case "treble":
+      return "b/4";
+    case "bass":
+      return "d/3";
+    case "alto":
+      return "c/4";
   }
 }
